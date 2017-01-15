@@ -4,7 +4,7 @@ Simple tester for the vgg19_trainable
 
 import tensorflow as tf
 
-import vgg10_trainable as vgg10
+import vgg16_trainable as vgg16
 import os
 import time
 import numpy as np
@@ -18,13 +18,13 @@ MOMENTUM = 0.9
 IMAGE_HEIGHT  = 224    #960
 IMAGE_WIDTH   = 224    #720
 NUM_CHANNELS  = 3
-BATCH_SIZE = 20
+BATCH_SIZE = 50
 N_CLASSES = 2
 DROPOUT = 0.50
 ckpt_dir = "/home/kami/ckpt_dir"
 LOGS_PATH = '/home/kami/tensorflow_logs'
 WEIGHT_PATH = '.npy'
-TRAINSET_PATH = '/home/kami/PycharmProjects/csvgeneration/imagenetdata21.csv'
+TRAINSET_PATH = '/home/kami/PycharmProjects/csvgeneration/imagenetdata100-1.csv'
 VALSET_PATH ='/home/kami/PycharmProjects/csvgeneration/imagenetdata21.csv'
 
 #=======================================================================================================
@@ -54,7 +54,7 @@ with tf.device('/cpu:0'):
     labels_tf = tf.placeholder(tf.int64)
     train_mode = tf.placeholder(tf.bool)
 
-    vgg = vgg10.Vgg10()
+    vgg = vgg16.Vgg16()
     vgg.build(images_tf, train_mode)
     weights_only = filter(lambda x: x.name.endswith('W:0'), tf.trainable_variables())
     for x in xrange(len(weights_only)):
@@ -68,7 +68,7 @@ with tf.device('/cpu:0'):
     #==============================================================================================================
     with tf.name_scope('Loss'):
         loss_tf = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(vgg.prob, labels_tf), name='loss_tf')
-        #loss_summary = tf.summary.scalar("loss", loss_tf)
+        loss_summary = tf.summary.scalar("loss", loss_tf)
         weights_only = filter( lambda x: x.name.endswith('W:0'), tf.trainable_variables())
         weight_decay = tf.reduce_sum(tf.pack([tf.nn.l2_loss(x) for x in weights_only])) * WEIGHT_DECAY_RATE
         loss_tf += weight_decay
@@ -77,20 +77,20 @@ with tf.device('/cpu:0'):
     # Optimizer, again it can be changed to any function provided by Tensorflow. You can simply use commented out line
     # instead of explicitly computing gradients, if you are not interested in creating summaries of gradients.
     # ==============================================================================================================
-    train_op = tf.train.MomentumOptimizer(learning_rate, MOMENTUM).minimize(loss_tf)
-    #optimizer = tf.train.MomentumOptimizer(0.01, MOMENTUM)
-    #grads_and_vars = optimizer.compute_gradients(loss_tf)
+    #train_op = tf.train.MomentumOptimizer(learning_rate, MOMENTUM).minimize(loss_tf)
+    optimizer = tf.train.MomentumOptimizer(learning_rate, MOMENTUM)
+    grads_and_vars = optimizer.compute_gradients(loss_tf)
     #grads_and_vars = map(
      #   lambda gv: (gv[0], gv[1]) if ('conv6' in gv[1].name or 'GAP' in gv[1].name) else (gv[0] * 0.1, gv[1]),
       #  grads_and_vars)
     #grads_and_vars = [(tf.clip_by_value(gv[0], -5., 5.), gv[1]) for gv in grads_and_vars]
-    #train_op = optimizer.apply_gradients(grads_and_vars)
+    train_op = optimizer.apply_gradients(grads_and_vars)
     #===================================================================================================================
     # Summaries for the gradients
     #===================================================================================================================
-    #for var in tf.trainable_variables():
-     #   tf.summary.histogram(var.op.name, var)
-    #summary_op = tf.summary.merge_all()
+    for var in tf.trainable_variables():
+        tf.summary.histogram(var.op.name, var)
+    summary_op = tf.summary.merge_all()
 
 
     # ===================================================================================================================
@@ -113,7 +113,7 @@ with tf.device('/cpu:0'):
     threads = tf.train.start_queue_runners(sess=sess, coord=coord)
 
     loss_list, valacc_list, trainacc_list, plot_loss = [], [], [], []
-    #summary_writer = tf.summary.FileWriter(LOGS_PATH, graph=tf.get_default_graph())
+    summary_writer = tf.summary.FileWriter(LOGS_PATH, graph=tf.get_default_graph())
     steps = 1
     count = 1
 
@@ -122,26 +122,27 @@ with tf.device('/cpu:0'):
         train_correct = 0
         train_data = 0
         epoch_start_time = time.time()
-
-        for i in range(20 / BATCH_SIZE):
+        print(sess.run([var for _, var in grads_and_vars]))
+        for i in range(100 / BATCH_SIZE):
             train_imbatch, train_labatch = sess.run([train_image_batch, train_label_batch])
-            _, loss_val, output_val, train_accuracy = sess.run(
-                [train_op, loss_tf, vgg.prob, accuracy],
+            _, loss_val, output_val, train_accuracy, summary_str = sess.run(
+                [train_op, loss_tf, vgg.prob, accuracy, summary_op],
                 feed_dict={learning_rate: INIT_LEARNING_RATE, images_tf: train_imbatch, labels_tf:
                     train_labatch, train_mode: True})
-            # loss_list.append(loss_val)
-            # trainacc_list.append(train_accuracy)
+
+            loss_list.append(loss_val)
 
             train_data += len(output_val)
 
             if (steps) % 1 == 0:  # after 5 batches
                 print "======================================"
                 print "Epoch", epoch + 1, "Iteration", steps
-                print "Processed", train_data, '/', 20  # (count*BATCH_SIZE)
+                print "Processed", train_data, '/', 100  # (count*BATCH_SIZE)
                 print 'Accuracy: ', train_accuracy
                 #print 'labels: ', train_labatch
-                print "Training Loss:", loss_val
-                #summary_writer.add_summary(summary_str, steps)
+                print "Training Loss:", np.mean(loss_val)
+                summary_writer.add_summary(summary_str, steps)
+
                 loss_list = []
             steps += 1
             count += 1
