@@ -1,37 +1,41 @@
 """
-Simple tester for the vgg19_trainable
+Simple tester for the vgg16_trainable
 """
 
 import tensorflow as tf
 
-import vgg10_trainable as vgg10
+import vgg16_trainable as vgg16
 import os
 import time
 import numpy as np
-import utils
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 PRETRAINED_MODEL_PATH= None
 N_EPOCHS = 300
-INIT_LEARNING_RATE = 0.001
+INIT_LEARNING_RATE = 0.01
 WEIGHT_DECAY_RATE = 0.0005
 MOMENTUM = 0.9
 IMAGE_HEIGHT  = 224    #960
 IMAGE_WIDTH   = 224    #720
 NUM_CHANNELS  = 3
-BATCH_SIZE = 20
+BATCH_SIZE = 50
 N_CLASSES = 2
 DROPOUT = 0.50
-ckpt_dir = "/home/kami/ckpt_dir"
-LOGS_PATH = '/home/kami/tensorflow_logs'
+ckpt_dir = "/home/sik4hi/ckpt_dir"
+LOGS_PATH = '/home/sik4hi/tensorflow_logs'
 WEIGHT_PATH = '.npy'
-TRAINSET_PATH = '/home/kami/PycharmProjects/csvgeneration/imagenetdata21.csv'
-VALSET_PATH ='/home/kami/PycharmProjects/csvgeneration/imagenetdata21.csv'
+TRAINSET_PATH = '/mnt/data1/imagenet-data/csv-files/train/imagenetdata1.csv'
+TRAINSET_PATH1 = '/mnt/data1/imagenet-data/csv-files/train/imagenetdata2.csv'
+TRAINSET_PATH2 = '/mnt/data1/imagenet-data/csv-files/train/imagenetdata3.csv'
+TRAINSET_PATH3 = '/mnt/data1/imagenet-data/csv-files/train/imagenetdata4.csv'
+TRAINSET_PATH4 = '/mnt/data1/imagenet-data/csv-files/train/imagenetdata5.csv'
+VALSET_PATH ='/mnt/data1/imagenet-data/csv-files/val/imagenetdata1.csv'
 
 #=======================================================================================================
 # Reading Training data from CSV FILE
 #=======================================================================================================
 
-csv_path = tf.train.string_input_producer([TRAINSET_PATH], shuffle=True)
+csv_path = tf.train.string_input_producer([TRAINSET_PATH, TRAINSET_PATH1, TRAINSET_PATH2, TRAINSET_PATH3, TRAINSET_PATH4], shuffle=True)
 textReader = tf.TextLineReader()
 _, csv_content = textReader.read(csv_path)
 im_name, im_label = tf.decode_csv(csv_content, record_defaults=[[""], [1]])
@@ -47,14 +51,14 @@ train_image_batch, train_label_batch = tf.train.shuffle_batch([train_image, trai
                                                               capacity = 1000 + 3*BATCH_SIZE, min_after_dequeue = 1000)
 #train_label_batch = tf.one_hot(train_label_batch, 1000)
 
-with tf.device('/cpu:0'):
+with tf.device('/gpu:0'):
     sess = tf.Session()
     learning_rate = tf.placeholder(tf.float32, [])
     images_tf = tf.placeholder(tf.float32, [None, 224, 224, 3])
     labels_tf = tf.placeholder(tf.int64)
     train_mode = tf.placeholder(tf.bool)
 
-    vgg = vgg10.Vgg10()
+    vgg = vgg16.Vgg16()
     vgg.build(images_tf, train_mode)
     weights_only = filter(lambda x: x.name.endswith('W:0'), tf.trainable_variables())
     for x in xrange(len(weights_only)):
@@ -102,11 +106,9 @@ with tf.device('/cpu:0'):
     # ===================================================================================================================
     # Saver Operation to save and restore all variables.
     # ===================================================================================================================
-    if not os.path.exists(ckpt_dir):
-        os.makedirs(ckpt_dir)
-    saver = tf.train.Saver(max_to_keep=5)
-with tf.device('/cpu:0'):
-    sess.run(tf.global_variables_initializer())
+
+with tf.device('/gpu:0'):
+    sess.run(tf.initialize_all_variables())
 
     # For populating queues with batches, very important!
     coord = tf.train.Coordinator()
@@ -123,30 +125,31 @@ with tf.device('/cpu:0'):
         train_data = 0
         epoch_start_time = time.time()
 
-        for i in range(20 / BATCH_SIZE):
+        for i in range(13000 / BATCH_SIZE+1):
             train_imbatch, train_labatch = sess.run([train_image_batch, train_label_batch])
             _, loss_val, output_val, train_accuracy = sess.run(
                 [train_op, loss_tf, vgg.prob, accuracy],
                 feed_dict={learning_rate: INIT_LEARNING_RATE, images_tf: train_imbatch, labels_tf:
                     train_labatch, train_mode: True})
-            # loss_list.append(loss_val)
-            # trainacc_list.append(train_accuracy)
+            loss_list.append(loss_val)
+            trainacc_list.append(train_accuracy)
 
             train_data += len(output_val)
 
-            if (steps) % 1 == 0:  # after 5 batches
+            if (steps) % 5 == 0:  # after 5 batches
                 print "======================================"
                 print "Epoch", epoch + 1, "Iteration", steps
-                print "Processed", train_data, '/', 20  # (count*BATCH_SIZE)
-                print 'Accuracy: ', train_accuracy
+                print "Processed", train_data, '/', 13000  # (count*BATCH_SIZE)
+                print 'Accuracy: ', np.mean(trainacc_list)
                 #print 'labels: ', train_labatch
-                print "Training Loss:", loss_val
+                print "Training Loss:", np.mean(loss_list)
                 #summary_writer.add_summary(summary_str, steps)
                 loss_list = []
+                trainacc_list = []
             steps += 1
             count += 1
         count = 1
-        INIT_LEARNING_RATE *= 0.99
+        #INIT_LEARNING_RATE *= 0.99
 
         # for i in range(100 / BATCH_SIZE + 1):
         #     val_imbatch, val_labatch = sess.run([train_image_batch, train_label_batch])

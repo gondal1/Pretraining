@@ -18,10 +18,12 @@ FLAGS = tf.app.flags.FLAGS
 
 N_EPOCHS = 500
 MOMENTUM = 0.9
+INIT_LEARNING_RATE = 0.001
 LOGS_PATH = '/home/sik4hi/tensorflow_logs'
 ckpt_dir = "/home/sik4hi/ckpt_dir"
 
 def main(_):
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
     # =======================================================================================================
     # Reading Training data from tfrecords
     # =======================================================================================================
@@ -44,8 +46,9 @@ def main(_):
   # =======================================================================================================
   # Placeholders for feeding data
   # =======================================================================================================
+    learning_rate = tf.placeholder(tf.float32, [])
     images_tf = tf.placeholder(tf.float32, [None, 224, 224, 3])
-    labels_tf = tf.placeholder(tf.float32, [None, 1000])
+    labels_tf = tf.placeholder(tf.int64)
     train_mode = tf.placeholder(tf.bool)
 
   # ==============================================================================================================
@@ -59,14 +62,14 @@ def main(_):
     # Defining Loss, could be changed from cross entropy depending on needs. The current configuration works well on
     # multiclass (not hot-encoded vectors) prediction like ImageNET.
     # ==============================================================================================================
-    with tf.device('/gpu:0'):
+    with tf.device('/gpu:1'):
         with tf.name_scope('Loss'):
-            cross_entropy = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(vgg.prob, labels_tf))
-            #loss_tf = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(vgg.prob, labels_tf))
+            #loss_tf = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(vgg.prob, labels_tf))
+            loss_tf = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(vgg.prob, labels_tf))
             #loss_summary = tf.scalar_summary("loss", cross_entropy)
-            #weights_only = filter(lambda x: x.name.endswith('W:0'), tf.trainable_variables())
-            #weight_decay = tf.reduce_sum(tf.pack([tf.nn.l2_loss(x) for x in weights_only])) * FLAGS.learning_rate_decay_factor
-            #cross_entropy += weight_decay
+            weights_only = filter(lambda x: x.name.endswith('W:0'), tf.trainable_variables())
+            weight_decay = tf.reduce_sum(tf.pack([tf.nn.l2_loss(x) for x in weights_only])) * FLAGS.learning_rate_decay_factor
+            loss_tf += weight_decay
 
         # ==============================================================================================================
         # Optimizer
@@ -87,7 +90,7 @@ def main(_):
          #                               staircase=True)
 
         # Create an optimizer that performs gradient descent.
-        train_op = tf.train.MomentumOptimizer(0.1, MOMENTUM).minimize(cross_entropy)
+        train_op = tf.train.MomentumOptimizer(learning_rate, MOMENTUM).minimize(loss_tf)
 
         # ===================================================================================================================
         # Accuracy for the current batch
@@ -98,16 +101,18 @@ def main(_):
         # ===================================================================================================================
         # Saver Operation to save and restore all variables.
         # ===================================================================================================================
-    with tf.device('/cpu:0'):
-        if not os.path.exists(ckpt_dir):
-            os.makedirs(ckpt_dir)
-        saver = tf.train.Saver(max_to_keep=5)
-        f = open('out.txt', 'wb')
+    #with tf.device('/cpu:0'):
+    #    if not os.path.exists(ckpt_dir):
+    #        os.makedirs(ckpt_dir)
+    #    saver = tf.train.Saver(max_to_keep=5)
+    #    f = open('out.txt', 'wb')
 
-    with tf.device('/gpu:0'):
+    with tf.device('/gpu:1'):
         sess = tf.Session()
         sess.run(tf.initialize_all_variables())
-        tf.train.start_queue_runners(sess=sess)
+        coord = tf.train.Coordinator()
+        threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+
         loss_list, plot_trainAccuracy, plot_loss, plot_valAccuracy = [], [], [], []
         #summary_writer = tf.train.SummaryWriter(LOGS_PATH, graph=tf.get_default_graph())
         steps = 1
@@ -123,8 +128,8 @@ def main(_):
             print(x)
             for i in range(x + 1):  # You can simply put a number here, but you definitely need to know the                                                         # size of training set.
                 train_imbatch, train_labatch = sess.run([train_image_batch, train_label_batch])
-                _, loss_val, output_val, train_accuracy = sess.run([train_op, cross_entropy, vgg.prob, accuracy],
-                                        feed_dict={images_tf: train_imbatch, labels_tf:
+                _, loss_val, output_val, train_accuracy = sess.run([train_op, loss_tf, vgg.prob, accuracy],
+                                        feed_dict={learning_rate: INIT_LEARNING_RATE, images_tf: train_imbatch, labels_tf:
                                         train_labatch, train_mode: True})
                 loss_list.append(loss_val)
                 plot_trainAccuracy.append(train_accuracy)  # For visualizing training accuracy curve
@@ -144,8 +149,8 @@ def main(_):
                 steps += 1
                 count += 1
             count = 1
-            if (epoch % 5 == 0):
-                saver.save(sess, ckpt_dir + "/model.ckpt", global_step=epoch)
+            #if (epoch % 5 == 0):
+            #    saver.save(sess, ckpt_dir + "/model.ckpt", global_step=epoch)
             # x=int(dataset_val.num_examples_per_epoch()/FLAGS.batch_size)
             # for i in range(x + 1):
             #     val_imbatch, val_labatch = sess.run([val_image_batch, val_label_batch])
@@ -158,6 +163,6 @@ def main(_):
             # f.write('epoch:' + str(epoch + 1) + '\tacc:' + str(val_accuracy) + '\n')
             # f.write('Time Elapsed for Epoch:' + str(epoch + 1) + ' is ' + str((time.time() - epoch_start_time) / 60.) + ' minutes')  # or f.write('...\n')
             # f.write('\n')
-        f.close()
+        #f.close()
 if __name__ == '__main__':
   tf.app.run()
